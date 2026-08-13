@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-bg: #f7f8fa;
+  --color-panel: #ffffff;
+  --color-panel2: #f1f3f7;
+  --color-edge: #e3e6ec;
+  --color-body: #101218;
+  --color-muted: #697086;
+  --color-accent: #4f46e5;
+  --color-good: #16a34a;
+  --color-caution: #d97706;
+  --color-bad: #dc2626;
+  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+
+  --animate-fade-in: fade-in 0.25s ease-out both;
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+}
+
+.dark {
+  --color-bg: #0d0f14;
+  --color-panel: #14161d;
+  --color-panel2: #1b1e27;
+  --color-edge: #262a35;
+  --color-body: #ececf1;
+  --color-muted: #8b90a0;
+  --color-accent: #818cf8;
+  --color-good: #34d399;
+  --color-caution: #fbbf24;
+  --color-bad: #f87171;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--font-sans);
+  color: var(--color-body);
+  color-scheme: light;
+  min-height: 100vh;
+  background: var(--color-bg);
+}
+
+.dark body {
+  color-scheme: dark;
+}
+
+::selection {
+  background: rgba(99, 102, 241, 0.25);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
