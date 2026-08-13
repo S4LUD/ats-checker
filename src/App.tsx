@@ -95,8 +95,10 @@ function App() {
       try {
         const { semanticMatch } = await import('./lib/analysis/semantic')
         const hits = await semanticMatch(resumeText, terms)
+        console.info(`[deep-match] ${hits.length}/${terms.length} semantic hit(s)`, hits.map((h) => ({ term: h.term, sim: +h.similarity.toFixed(3), match: h.matchedPhrase })))
         if (!cancelled) setSemanticHits(hits.map((h) => h.term))
-      } catch {
+      } catch (err) {
+        console.warn('[deep-match] failed:', err)
         if (!cancelled) setSemanticHits([])
       } finally {
         if (!cancelled) setSemanticBusy(false)

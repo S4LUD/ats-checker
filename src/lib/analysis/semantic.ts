@@ -43,19 +43,35 @@ export function cosine(a: number[], b: number[]): number {
   return denom === 0 ? 0 : dot / denom
 }
 
-function chunkResume(resumeText: string): string[] {
-  return resumeText
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length >= 20 && l.length <= 200)
-    .slice(0, 120)
+/**
+ * Split the resume into comparison units. Whole lines are kept (good for
+ * summary/header sentences), but long lines are ALSO split at clause
+ * boundaries (commas, semicolons, bullet markers) into smaller chunks — a
+ * short JD phrase compared against a long multi-clause line gets its meaning
+ * diluted by mean pooling, so clause-sized units match far better.
+ */
+export function chunkResume(resumeText: string, maxChunks = 240): string[] {
+  const chunks: string[] = []
+  for (const raw of resumeText.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (line.length < 20 || line.length > 200) continue
+    chunks.push(line)
+    const parts = line.split(/\s•\s|[;,]/)
+    if (parts.length < 2) continue
+    for (const part of parts) {
+      const piece = part.trim()
+      if (piece.length >= 6) chunks.push(piece)
+    }
+  }
+  return chunks.slice(0, maxChunks)
 }
 
 /**
  * Find JD keywords that never matched lexically but appear semantically in the
  * resume (e.g. JD says "cloud infra" and the resume says "AWS infrastructure").
- * `minSimilarity` defaults to 0.78 — tuned for all-MiniLM-L6-v2, where
- * paraphrase-level synonyms sit around 0.8 and unrelated terms < 0.5.
+ * `minSimilarity` defaults to 0.68 — calibrated against clause-level chunks of
+ * real resumes for all-MiniLM-L6-v2, where genuine paraphrases land ~0.7 and
+ * unrelated terms stay below ~0.55.
  */
 export async function semanticMatch(
   resumeText: string,
@@ -63,7 +79,7 @@ export async function semanticMatch(
   opts?: { embed?: EmbedFn; minSimilarity?: number },
 ): Promise<SemanticHit[]> {
   const embed = opts?.embed ?? (await getEmbedder())
-  const minSimilarity = opts?.minSimilarity ?? 0.78
+  const minSimilarity = opts?.minSimilarity ?? 0.68
   const targets = terms.map((t) => t.trim().toLowerCase()).filter((t) => t.length > 1)
   if (targets.length === 0) return []
   const lines = chunkResume(resumeText)
