@@ -41,7 +41,7 @@ function App() {
   const [presetId, setPresetId] = useState<PresetId>('auto')
   const [localeId, setLocaleId] = useState<LocaleId>('global')
   const [compareAll, setCompareAll] = useState(true)
-  const [deepMatch, setDeepMatch] = useState(false)
+  const [deepMatch, setDeepMatch] = useState(true)
   const [semanticHits, setSemanticHits] = useState<string[]>([])
   const [semanticBusy, setSemanticBusy] = useState(false)
   const [busy, setBusy] = useState(false)
