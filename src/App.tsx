@@ -38,7 +38,7 @@ function App() {
   const [source, setSource] = useState<ResumeSourceMeta | null>(null)
   const [jdText, setJdText] = useState('')
   const [presetId, setPresetId] = useState<PresetId>('auto')
-  const [localeId, setLocaleId] = useState<LocaleId>('us')
+  const [localeId, setLocaleId] = useState<LocaleId>('global')
   const [compareAll, setCompareAll] = useState(true)
   const [busy, setBusy] = useState(false)
   const [fileError, setFileError] = useState<string | null>(null)
