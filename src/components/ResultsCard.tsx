@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { Download } from 'lucide-react'
 import type { Check, KeywordAnalysis, KeywordInfo, PresetResults, ScoreDeltas } from '../lib/types'
+import type { ParsedResume } from '../lib/parse/resume-parser'
 import { buildReportMd, downloadReport } from '../lib/report'
 import { AiTips } from './AiTips'
 import { ScoreRing } from './ScoreRing'
 import { CompareTable } from './CompareTable'
 import { CheckList } from './CheckList'
 import { Chips, KeywordChips } from './Chips'
+import { ParserPreview } from './ParserPreview'
 
 interface CategoryBarProps {
   label: string
@@ -47,6 +49,10 @@ interface ResultsCardProps {
   sourceName: string
   resumeText: string
   jdText: string
+  parsed: ParsedResume | null
+  deepMatch: boolean
+  semanticBusy: boolean
+  semanticHits: string[]
 }
 
 function Section({ children, className = '' }: { children: React.ReactNode; className?: string }) {
@@ -75,6 +81,10 @@ export function ResultsCard({
   sourceName,
   resumeText,
   jdText,
+  parsed,
+  deepMatch,
+  semanticBusy,
+  semanticHits,
 }: ResultsCardProps) {
   const [saved, setSaved] = useState(false)
 
@@ -125,6 +135,18 @@ export function ResultsCard({
         </div>
       </Section>
 
+      {parsed && (
+        <Section className="mt-4 pt-4">
+          <ParserPreview parsed={parsed} />
+          {kwRes && kwRes.inflected.length > 0 && (
+            <p className="text-[11px] text-muted mt-2">
+              Keyword depth note: {kwRes.inflected.length} JD term(s) counted via plurals/stems; skill-depth totals are visible in the
+              parser preview above.
+            </p>
+          )}
+        </Section>
+      )}
+
       {deltas.deltas.length > 0 && (
         <Section>
           <SectionTitle>Potential after fixing flagged items</SectionTitle>
@@ -167,6 +189,23 @@ export function ResultsCard({
                   <p className="text-[12px] font-medium mb-1 text-good">Matched</p>
                   <KeywordChips items={kwRes.matched} />
                 </div>
+                {semanticHits.length > 0 && (
+                  <div>
+                    <p className="text-[12px] font-medium mb-1 text-accent">
+                      Matched by deep match{deepMatch ? ' (semantic)' : ''}
+                    </p>
+                    <Chips items={semanticHits} tone="neutral" />
+                  </div>
+                )}
+                {semanticBusy && deepMatch && (
+                  <p className="text-[11px] text-muted">Deep match is still scanning your resume…</p>
+                )}
+                {kwRes.inflected.length > 0 && (
+                  <div>
+                    <p className="text-[12px] font-medium mb-1 text-muted">Matched via plurals/stems (e.g. "databases" → "database")</p>
+                    <Chips items={kwRes.inflected} tone="neutral" />
+                  </div>
+                )}
                 {kwRes.irrelevant.length > 0 && (
                   <div>
                     <p className="text-[12px] font-medium mb-1 text-muted">On your resume but not in the job — consider trimming</p>
@@ -237,6 +276,12 @@ export function ResultsCard({
           miscFails={miscChecks.filter((c) => c.level !== 'pass').map((c) => c.label)}
         />
       </div>
+
+      <p className="text-[11px] text-muted mt-4 pt-3 border-t border-edge leading-relaxed">
+        These scores are heuristic estimates from keyword coverage, format rules, and contact checks — real ATS software parses
+        resumes and ranks them with its own rules and recruiter settings, so no score can replicate a specific employer's system.
+        Deep match runs a small semantic model (all-MiniLM-L6-v2) locally in your browser; OCR for scanned PDFs also runs locally.
+      </p>
     </div>
   )
 }

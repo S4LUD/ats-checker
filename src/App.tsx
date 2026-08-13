@@ -8,6 +8,7 @@ import { checkBullets } from './lib/analysis/bullets'
 import { checkContact } from './lib/analysis/contact'
 import { checkMisc } from './lib/analysis/misc'
 import { computeScores, computeScoreDeltas, compareAcrossPresets } from './lib/analysis/scoring'
+import { parseResume } from './lib/parse/resume-parser'
 import { SAMPLE_JD, SAMPLE_RESUMES } from './lib/extract/samples'
 import type { LocaleId, PresetId, ResumeSourceMeta } from './lib/types'
 import { JdPanel, ResumePanel } from './components/InputPanel'
@@ -40,6 +41,9 @@ function App() {
   const [presetId, setPresetId] = useState<PresetId>('auto')
   const [localeId, setLocaleId] = useState<LocaleId>('global')
   const [compareAll, setCompareAll] = useState(true)
+  const [deepMatch, setDeepMatch] = useState(false)
+  const [semanticHits, setSemanticHits] = useState<string[]>([])
+  const [semanticBusy, setSemanticBusy] = useState(false)
   const [busy, setBusy] = useState(false)
   const [fileError, setFileError] = useState<string | null>(null)
   const resultsRef = useRef<HTMLDivElement>(null)
@@ -53,19 +57,56 @@ function App() {
     if (!resumeText.trim()) return null
     const src = source ?? PASTED_SOURCE
     const base = { preset, resumeText, source: src, jdText, keywords, locale }
-    const kwRes = keywords ? keywordAnalysis(resumeText.toLowerCase(), keywords, preset) : null
+    const kwRes = keywords ? keywordAnalysis(resumeText.toLowerCase(), keywords, preset, { semanticHits }) : null
     const detectedSkills = keywords ? null : detectResumeSkills(resumeText)
     const fmtChecks = checkFormatting(resumeText, src, locale)
     const bulletChecks = checkBullets(resumeText)
     const contactChecks = checkContact(resumeText)
     const miscChecks = checkMisc(resumeText, jdText, locale)
-    const breakdown = computeScores(base)
-    const deltas = computeScoreDeltas(base)
+    const breakdown = computeScores({ ...base, kwRes })
+    const deltas = computeScoreDeltas({ ...base, kwRes })
     const compareResults = compareAll
       ? compareAcrossPresets({ ...base, presets: PRESET_IDS.map((id) => ATS_PRESETS[id]) })
       : null
     return { kwRes, detectedSkills, fmtChecks, bulletChecks, contactChecks, miscChecks, breakdown, deltas, compareResults }
-  }, [resumeText, source, keywords, preset, locale, compareAll, jdText])
+  }, [resumeText, source, keywords, preset, locale, compareAll, jdText, semanticHits])
+
+  const parsed = useMemo(() => (resumeText.trim() ? parseResume(resumeText) : null), [resumeText])
+
+  useEffect(() => {
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    if (!deepMatch || !keywords || resumeText.trim().length < 40) {
+      setSemanticHits([])
+      setSemanticBusy(false)
+      return
+    }
+    timer = setTimeout(async () => {
+      const lexical = keywordAnalysis(resumeText.toLowerCase(), keywords, preset)
+      const terms = lexical.missing.slice(0, 25)
+      if (terms.length === 0) {
+        if (!cancelled) {
+          setSemanticHits([])
+          setSemanticBusy(false)
+        }
+        return
+      }
+      if (!cancelled) setSemanticBusy(true)
+      try {
+        const { semanticMatch } = await import('./lib/analysis/semantic')
+        const hits = await semanticMatch(resumeText, terms)
+        if (!cancelled) setSemanticHits(hits.map((h) => h.term))
+      } catch {
+        if (!cancelled) setSemanticHits([])
+      } finally {
+        if (!cancelled) setSemanticBusy(false)
+      }
+    }, 500)
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [deepMatch, keywords, preset, resumeText])
 
   const handleFile = async (file: File) => {
     setBusy(true)
@@ -176,6 +217,23 @@ function App() {
             />
             Compare all ATS systems
           </label>
+          <label
+            className={`flex items-center gap-1.5 text-[13px] cursor-pointer select-none transition-colors ${
+              deepMatch ? 'text-body' : 'text-muted hover:text-body'
+            }`}
+            title="Runs a small semantic model locally to catch JD terms phrased differently in your resume, plus stem/negation matching"
+          >
+            <input
+              type="checkbox"
+              checked={deepMatch}
+              onChange={(e) => setDeepMatch(e.target.checked)}
+              className="accent-accent size-3.5"
+            />
+            Deep match
+            {semanticBusy && (
+              <span className="size-3 rounded-full border-[1.5px] border-accent/30 border-t-accent animate-spin" />
+            )}
+          </label>
           <span className="flex items-center gap-1.5">
             <label htmlFor="ats-preset" className="text-[13px] text-muted">
               Simulate:
@@ -232,6 +290,10 @@ function App() {
               sourceName={(source ?? PASTED_SOURCE).name}
               resumeText={resumeText}
               jdText={jdText}
+              parsed={parsed}
+              deepMatch={deepMatch}
+              semanticBusy={semanticBusy}
+              semanticHits={semanticHits}
             />
           </div>
         )}

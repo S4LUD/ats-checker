@@ -14,6 +14,46 @@ export class FileExtractionError extends Error {
   }
 }
 
+const SPARSE_WORD_THRESHOLD = 25
+
+/** render every page to a canvas and OCR it with tesseract.js (lazy import) */
+async function ocrPdf(pdf: Awaited<ReturnType<typeof pdfjsLib.getDocument>['promise']>, name: string): Promise<{ text: string; meta: ResumeSourceMeta }> {
+  const { createWorker } = await import('tesseract.js')
+  const worker = await createWorker('eng')
+  const textLines: string[] = []
+  try {
+    for (let p = 1; p <= pdf.numPages; p++) {
+      const page = await pdf.getPage(p)
+      const viewport = page.getViewport({ scale: 2 })
+      const canvas = document.createElement('canvas')
+      canvas.width = viewport.width
+      canvas.height = viewport.height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) continue
+      await page.render({ canvasContext: ctx, viewport, canvas }).promise
+      const { data } = await worker.recognize(canvas)
+      textLines.push(data.text)
+    }
+  } finally {
+    await worker.terminate()
+  }
+  const text = textLines.join('\n')
+  return {
+    text,
+    meta: {
+      kind: 'pdf',
+      name,
+      words: wordCount(text),
+      tableCount: null,
+      imgCount: null,
+      pageCount: pdf.numPages,
+      twoColScore: null,
+      interleaved: null,
+      ocrFallback: true,
+    },
+  }
+}
+
 async function extractPdf(buffer: ArrayBuffer, name: string): Promise<{ text: string; meta: ResumeSourceMeta }> {
   const pdf = await pdfjsLib.getDocument({ data: buffer }).promise
   const textLines: string[] = []
@@ -54,6 +94,13 @@ async function extractPdf(buffer: ArrayBuffer, name: string): Promise<{ text: st
   }
 
   const text = textLines.join('\n')
+  if (wordCount(text) < SPARSE_WORD_THRESHOLD) {
+    try {
+      return await ocrPdf(pdf, name)
+    } catch {
+      // OCR unavailable or failed — keep the sparse text so the user still gets a result
+    }
+  }
   const twoColScore = allStarts > 0 ? rightStarts / allStarts : 0
   return {
     text,

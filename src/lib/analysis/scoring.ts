@@ -4,6 +4,7 @@ import { checkFormatting } from './format'
 import { checkBullets } from './bullets'
 import { checkContact } from './contact'
 import { checkMisc } from './misc'
+import { RUBRIC } from './rubric'
 
 export function gradeFor(total: number): GradeLabel {
   if (total >= 85) return 'Excellent'
@@ -17,9 +18,9 @@ export function formatScore(checks: Check[], preset: AtsPreset): number {
   for (const c of checks) {
     if (c.mono) continue
     if (c.level === 'fail') {
-      penalty += /table/i.test(c.label) ? preset.tablePenalty : 12
+      penalty += /table/i.test(c.label) ? preset.tablePenalty : RUBRIC.format.fail
     } else if (c.level === 'warn') {
-      penalty += 6
+      penalty += RUBRIC.format.warn
     }
   }
   return Math.max(0, Math.min(100, 100 - penalty))
@@ -29,21 +30,21 @@ export function bulletScore(checks: Check[]): number {
   let penalty = 0
   for (const c of checks) {
     if (c.mono) continue
-    penalty += c.level === 'fail' ? 12 : c.level === 'warn' ? 6 : 0
+    penalty += c.level === 'fail' ? RUBRIC.bullets.fail : c.level === 'warn' ? RUBRIC.bullets.warn : 0
   }
   return Math.max(0, Math.min(100, 100 - penalty))
 }
 
 export function contactScore(checks: Check[]): number {
   const misses = checks.filter((c) => !c.mono && c.level !== 'pass').length
-  return Math.max(0, Math.min(100, 100 - misses * 12))
+  return Math.max(0, Math.min(100, 100 - misses * RUBRIC.contact.miss))
 }
 
 export function miscScore(checks: Check[]): number {
   let penalty = 0
   for (const c of checks) {
     if (c.mono) continue
-    penalty += c.level === 'fail' ? 40 : c.level === 'warn' ? 20 : 0
+    penalty += c.level === 'fail' ? RUBRIC.misc.fail : c.level === 'warn' ? RUBRIC.misc.warn : 0
   }
   return Math.max(0, Math.min(100, 100 - penalty))
 }

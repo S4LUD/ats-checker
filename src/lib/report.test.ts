@@ -16,6 +16,8 @@ const KW_RES: KeywordAnalysis = {
   low: [],
   irrelevant: [],
   listOnly: [],
+  inflected: [],
+  semanticHits: [],
   score: 50,
   total: 2,
   keywordWeight: 2,

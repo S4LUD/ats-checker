@@ -32,6 +32,10 @@ export interface KeywordAnalysis {
   irrelevant: string[]
   /** matched terms that only appear in a skills-list section, never in a bullet — stuffing signal */
   listOnly: string[]
+  /** terms that only matched via inflection variants (plurals, -ing/-ed) */
+  inflected: string[]
+  /** JD keywords found semantically (embedding similarity) when deep match is enabled */
+  semanticHits: string[]
   score: number
   total: number
   keywordWeight: number
@@ -62,6 +66,8 @@ export interface ResumeSourceMeta {
   twoColScore: number | null
   /** true when a two-column PDF emits text column-by-column, scrambling read order */
   interleaved: boolean | null
+  /** true when the PDF had no text layer and was OCR'd locally (tesseract.js) */
+  ocrFallback?: boolean
 }
 
 export type LocaleId = 'us' | 'eu' | 'jp' | 'global'

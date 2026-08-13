@@ -6,8 +6,10 @@ Everything runs **100% in your browser**. No backend, no accounts, no uploads �
 
 ## Features
 
-- **Resume input** — paste text, upload `.pdf` / `.docx` / `.txt`, or drag & drop. PDFs are parsed with pdf.js, Word docs with mammoth; text is reconstructed line-by-line so section detection and bullet parsing work on real layouts.
-- **Keyword analysis** — extracts keywords from the job description (skills lexicon, multi-word skills like `react native` / `ci cd`, phrases, and required vs. preferred signals) and reports **matched**, **under-used**, **missing**, and **irrelevant** keywords, plus "listed but never used in a bullet" stuffing detection. With no JD pasted, it instead detects skills directly in your resume.
+- **Resume input** — paste text, upload `.pdf` / `.docx` / `.txt`, or drag & drop. PDFs are parsed with pdf.js, Word docs with mammoth; text is reconstructed line-by-line so section detection and bullet parsing work on real layouts. Scanned PDFs with no text layer are OCR'd locally with tesseract.js.
+- **Keyword analysis** — extracts keywords from the job description (skills lexicon, multi-word skills like `react native` / `ci cd`, phrases, and required vs. preferred signals) and reports **matched**, **under-used**, **missing**, and **irrelevant** keywords, plus "listed but never used in a bullet" stuffing detection. Matching is smart: plurals/stems count (`databases` → `database`), and negated mentions ("no experience with X", "basic knowledge of X") are moved to missing. With no JD pasted, it instead detects skills directly in your resume.
+- **Deep match** *(optional)* — a small semantic model (all-MiniLM-L6-v2 via Transformers.js, ~25 MB, lazy-loaded) runs in your browser to catch JD terms phrased differently in your resume (e.g. "cloud infra" vs. "AWS infrastructure"), then re-scores keyword coverage with those hits.
+- **Parser preview** — see exactly what a heuristic parser extracts from your resume: name, contact details, experience roles with companies and date ranges, and per-skill depth in months (from role durations × bullet mentions).
 - **Formatting & structure checks** — required sections, summary, length vs. locale targets, tables, images, two-column layout risk, date consistency, role/date-range parsing, special characters.
 - **Bullet checks** — weak-verb openers, metrics in bullets, general bullet hygiene.
 - **Contact checks** — email, phone, LinkedIn, location (US `City, ST` / ZIP plus international patterns and `Remote`).
@@ -29,7 +31,7 @@ bun run dev        # start the Vite dev server
 bun run build      # type-check (tsc -b) + production build
 bun run preview    # preview the production build
 bun run lint       # oxlint
-bun run test       # vitest (38 tests)
+bun run test       # vitest (72 tests)
 ```
 
 ## How the analysis works
@@ -46,7 +48,7 @@ resume text + JD text
         └─ compareAcrossPresets / computeScoreDeltas
 ```
 
-Each check is a plain `Check` (`{ level: 'pass' | 'warn' | 'fail', mark, label, mono? }`) rendered by `CheckList`. Scores are **heuristics**, not a real ATS — the goal is to surface the same classes of problems recruiters and parsers actually see.
+Each check is a plain `Check` (`{ level: 'pass' | 'warn' | 'fail', mark, label, mono? }`) rendered by `CheckList`. Scores are **heuristics**, not a real ATS — the goal is to surface the same classes of problems recruiters and parsers actually see. The parser preview and the score footnote are intentional honesty layers: they show what a heuristic parse looks like and remind you that real ATS behavior varies by vendor and recruiter settings.
 
 ### Adding or tweaking rules
 
@@ -71,6 +73,7 @@ src/
 ├── components/
 │   ├── InputPanel.tsx          # resume/JD panels: dropzone, samples, textareas
 │   ├── ResultsCard.tsx         # score ring, category bars, sections, actions
+│   ├── ParserPreview.tsx       # collapsible view of the structured parse
 │   ├── ScoreRing.tsx           # animated score ring + grade
 │   ├── CompareTable.tsx        # all-presets comparison table
 │   ├── CheckList.tsx           # pass/warn/fail check rows
@@ -78,6 +81,7 @@ src/
 │   └── AiTips.tsx              # optional AI tips panel + endpoint settings
 ├── lib/
 │   ├── analysis/               # keywords, format, bullets, contact, misc, scoring
+│   ├── parse/                  # structured resume parsing (name/roles/dates/depth)
 │   ├── ats/                    # ATS presets + locale settings
 │   ├── extract/                # pdf/docx/txt extraction, text helpers, samples
 │   ├── report.ts               # markdown report generation
@@ -92,6 +96,8 @@ src/
 - [Tailwind CSS v4](https://tailwindcss.com) with `@theme` design tokens and a `dark:` variant
 - [lucide-react](https://lucide.dev) icons
 - [pdfjs-dist](https://github.com/mozilla/pdf.js) + [mammoth](https://github.com/mwilliamson/mammoth.js) for local file parsing
+- [tesseract.js](https://github.com/naptha/tesseract.js) for OCR fallback on scanned PDFs
+- [Transformers.js](https://github.com/huggingface/transformers.js) + all-MiniLM-L6-v2 for optional semantic keyword matching
 - [Vitest](https://vitest.dev) + [oxlint](https://oxc.rs) for tests and linting
 
 ## Testing
@@ -100,7 +106,7 @@ src/
 bun run test
 ```
 
-38 unit tests cover the AI client (settings storage, request validation, response handling), PDF extraction (line reconstruction, word counts), analysis rules (keywords, contact/location, formatting, section ranges), and report generation.
+72 unit tests cover the analysis rules (keywords incl. inflection/negation, contact/location, formatting, section ranges), structured resume parsing, semantic matching (with an injectable embedder), score calibration against golden resumes, the AI client, PDF extraction, and report generation.
 
 ## Disclaimer
 

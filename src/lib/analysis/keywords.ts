@@ -1,4 +1,5 @@
 import type { AtsPreset, KeywordAnalysis, KeywordInfo, KeywordSuggestion } from '../types'
+import { phraseForms, isNegated, stemWord, formatMonths } from './normalize'
 
 const STOPWORDS = new Set(
   (
@@ -20,7 +21,7 @@ const SKILL_LEXICON = (
   .toLowerCase()
   .split(/\s+/)
 
-const ALL_SKILLS = Array.from(new Set([...SKILL_LEXICON, ...MULTI_WORD_SKILLS]))
+export const ALL_SKILLS = Array.from(new Set([...SKILL_LEXICON, ...MULTI_WORD_SKILLS]))
 
 /** canonical term -> phrasing variants that should count as the same keyword */
 export const ALIASES: Record<string, string[]> = {
@@ -141,6 +142,70 @@ export function countWithAliases(text: string, term: string): number {
   let n = 0
   for (const variant of synonyms(term)) n += countOccurrences(text, variant)
   return n
+}
+
+/** stemmed token stream of a document; hyphens and slashes count as word separators */
+function stemmedTokens(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[/-]/g, ' ')
+    .split(/[^a-z0-9+#.-]+/i)
+    .filter((t) => t.length > 1)
+    .map(stemWord)
+}
+
+/**
+ * inflection-tolerant variant matching (plurals/verb endings), used as a bonus
+ * signal when the exact term is absent — matches on stemmed token sequences so
+ * "data pipelines" counts toward "data pipeline" and "react-native" toward
+ * "react native".
+ */
+function countInflected(text: string, term: string): number {
+  const seq = phraseForms(term)[0]
+    .split(/\s+/)
+    .filter((t) => t.length > 1)
+    .map(stemWord)
+  if (seq.length === 0) return 0
+  const doc = stemmedTokens(text)
+  let n = 0
+  for (let i = 0; i + seq.length <= doc.length; i++) {
+    let ok = true
+    for (let j = 0; j < seq.length; j++) {
+      if (doc[i + j] !== seq[j]) {
+        ok = false
+        break
+      }
+    }
+    if (ok) n++
+  }
+  return n
+}
+
+/**
+ * Occurrences that are NOT preceded by a negation/hedging cue
+ * ("no experience with Python", "basic knowledge of React" → not counted).
+ */
+export function countUnnegated(text: string, term: string): number {
+  let n = 0
+  for (const variant of synonyms(term)) {
+    const matches = text.matchAll(termRegex(variant))
+    for (const m of matches) {
+      if (!isNegated(text, m.index ?? 0)) n++
+    }
+  }
+  return n
+}
+
+/** unnegated occurrences, plus inflected forms when the term is genuinely absent */
+export function countSmart(text: string, term: string): { count: number; inflected: boolean } {
+  const exact = countWithAliases(text, term)
+  const unnegated = countUnnegated(text, term)
+  if (unnegated > 0) return { count: unnegated, inflected: false }
+  if (exact === 0) {
+    const inf = countInflected(text, term)
+    if (inf > 0) return { count: inf, inflected: true }
+  }
+  return { count: 0, inflected: false }
 }
 
 function escapeRegExp(value: string): string {
@@ -318,28 +383,40 @@ export function detectResumeSkills(resumeText: string): KeywordInfo[] {
   for (const skill of [...MULTI_WORD_SKILLS, ...SKILL_LEXICON]) {
     const canon = CANONICAL_OF[skill] ?? skill
     if (seen.has(canon)) continue
-    const occ = countWithAliases(lower, skill)
-    if (occ === 0) continue
+    const occ = countSmart(lower, skill)
+    if (occ.count === 0) continue
     for (const variant of synonyms(skill)) seen.add(variant)
-    found.push({ term: canon, source: 'skill', count: occ, weight: DEFAULT_LINE_WEIGHT, required: false, preferred: false })
+    found.push({ term: canon, source: 'skill', count: occ.count, weight: DEFAULT_LINE_WEIGHT, required: false, preferred: false })
   }
   return found.sort((a, b) => b.count - a.count || a.term.localeCompare(b.term)).slice(0, 60)
 }
 
-export function keywordAnalysis(resumeText: string, keywords: KeywordInfo[], preset: AtsPreset): KeywordAnalysis {
+export function keywordAnalysis(
+  resumeText: string,
+  keywords: KeywordInfo[],
+  preset: AtsPreset,
+  opts?: { semanticHits?: string[] },
+): KeywordAnalysis {
   const resumeLower = resumeText.toLowerCase()
+  const semanticHits = opts?.semanticHits ?? []
   const lines = resumeText.split(/\r?\n/)
   const listRanges = listSectionRanges(lines)
   const matched: KeywordInfo[] = []
   const missing: string[] = []
   const low: KeywordInfo[] = []
   const listOnly: string[] = []
+  const inflected: string[] = []
 
   for (const kw of keywords) {
-    const occ = countWithAliases(resumeLower, kw.term)
-    if (occ > 0) {
-      if (occ < preset.minOccurrences) low.push({ ...kw, count: occ })
-      else matched.push({ ...kw, count: occ })
+    if (semanticHits.includes(kw.term)) {
+      matched.push({ ...kw, count: 1 })
+      continue
+    }
+    const occ = countSmart(resumeLower, kw.term)
+    if (occ.count > 0) {
+      if (occ.inflected) inflected.push(kw.term)
+      if (occ.count < preset.minOccurrences) low.push({ ...kw, count: occ.count })
+      else matched.push({ ...kw, count: occ.count })
       if (kw.source === 'skill' && listRanges.length > 0 && isListOnly(resumeLower, lines, listRanges, kw.term)) {
         listOnly.push(kw.term)
       }
@@ -360,17 +437,24 @@ export function keywordAnalysis(resumeText: string, keywords: KeywordInfo[], pre
 
   let covered = 0
   for (const kw of matched) {
-    covered += kw.weight * (listOnly.includes(kw.term) ? 0.85 : 1)
+    const semanticBonus = semanticHits.includes(kw.term) ? 0.9 : 1
+    covered += kw.weight * (listOnly.includes(kw.term) ? 0.85 : 1) * semanticBonus
   }
   for (const kw of low) {
     covered += kw.weight * 0.5
   }
   const score = keywordWeight > 0 ? (covered / keywordWeight) * 100 : 0
 
-  return { matched, missing, low, irrelevant: irrelevant.slice(0, 8), listOnly, score, total: keywords.length, keywordWeight }
+  return { matched, missing, low, irrelevant: irrelevant.slice(0, 8), listOnly, inflected, semanticHits, score, total: keywords.length, keywordWeight }
 }
 
-export function buildKeywordSuggestions(keywords: KeywordInfo[], missing: string[], low: KeywordInfo[], minOccurrences: number): KeywordSuggestion[] {
+export function buildKeywordSuggestions(
+  keywords: KeywordInfo[],
+  missing: string[],
+  low: KeywordInfo[],
+  minOccurrences: number,
+  skillMonths?: Map<string, number>,
+): KeywordSuggestion[] {
   const missingKw = keywords
     .filter((k) => missing.includes(k.term))
     .sort((a, b) => Number(b.required) - Number(a.required) || b.weight - a.weight || b.count - a.count)
@@ -379,7 +463,9 @@ export function buildKeywordSuggestions(keywords: KeywordInfo[], missing: string
   const missingSugs: KeywordSuggestion[] = missingKw.map((k) => {
     let action: string
     if (k.source === 'skill') {
-      action = `Add "${k.term}" to your Skills section and use it in at least one bullet under Experience.`
+      const depth = skillMonths?.get(k.term)
+      const depthNote = depth && depth >= 6 ? ` Your resume shows ~${formatMonths(depth)} of ${k.term} — make that explicit in a bullet.` : ''
+      action = `Add "${k.term}" to your Skills section and use it in at least one bullet under Experience.${depthNote}`
     } else if (k.source === 'phrase') {
       action = `Work "${k.term}" into a bullet with a concrete example — add a number if you can.`
     } else {

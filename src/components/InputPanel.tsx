@@ -63,7 +63,7 @@ export function ResumePanel({ text, onTextChange, onFile, samples, onSample, bus
 
   const status =
     source && !busy
-      ? `Loaded ${source.name} — ${source.words} words${source.pageCount ? `, ${source.pageCount} page(s)` : ''}${source.tableCount ? `, ${source.tableCount} table(s)` : ''}${source.imgCount && source.imgCount > 0 ? `, ${source.imgCount} image(s)` : ''}.`
+      ? `Loaded ${source.name} — ${source.words} words${source.pageCount ? `, ${source.pageCount} page(s)` : ''}${source.tableCount ? `, ${source.tableCount} table(s)` : ''}${source.imgCount && source.imgCount > 0 ? `, ${source.imgCount} image(s)` : ''}${source.ocrFallback ? ', OCR applied locally' : ''}.`
       : busy
         ? busyLabel
         : 'Paste text below, or drop a file above.'

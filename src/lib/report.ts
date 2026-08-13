@@ -68,6 +68,12 @@ export function buildReportMd(data: ReportData): string {
     if (kwRes.matched.length > 0) {
       lines.push(`**Matched (${kwRes.matched.length}):** ${kwRes.matched.slice(0, 12).map((k) => `\`${k.term}\``).join(', ')}${kwRes.matched.length > 12 ? ', …' : ''}`)
     }
+    if (kwRes.semanticHits.length > 0) {
+      lines.push(`**Matched semantically (${kwRes.semanticHits.length}):** ${kwRes.semanticHits.slice(0, 12).map((t) => `\`${t}\``).join(', ')}`)
+    }
+    if (kwRes.inflected.length > 0) {
+      lines.push(`**Matched via plurals/stems:** ${kwRes.inflected.slice(0, 12).map((t) => `\`${t}\``).join(', ')}`)
+    }
     lines.push('')
   }
   lines.push('## Format & structure')
