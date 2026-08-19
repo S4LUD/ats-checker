@@ -1,32 +1,9 @@
-export interface AiSettings {
-  apiKey: string
-  baseUrl: string
-  model: string
+export function getAiEndpoint(): string {
+  return import.meta.env.OLLAMA_AI_ENDPOINT ?? ''
 }
 
-export const AI_STORAGE_KEY = 'ats-ai-settings'
-export const AI_DEFAULTS: AiSettings = {
-  apiKey: '',
-  baseUrl: 'https://api.openai.com/v1/chat/completions',
-  model: 'gpt-4o-mini',
-}
-
-export function loadAiSettings(): AiSettings {
-  try {
-    const raw = localStorage.getItem(AI_STORAGE_KEY)
-    if (!raw) return { ...AI_DEFAULTS }
-    return { ...AI_DEFAULTS, ...JSON.parse(raw) }
-  } catch {
-    return { ...AI_DEFAULTS }
-  }
-}
-
-export function saveAiSettings(settings: AiSettings): void {
-  localStorage.setItem(AI_STORAGE_KEY, JSON.stringify(settings))
-}
-
-export function clearAiSettings(): void {
-  localStorage.removeItem(AI_STORAGE_KEY)
+export function getAiModel(): string {
+  return import.meta.env.OLLAMA_AI_MODEL ?? ''
 }
 
 function summaryForPrompt(score: number, grade: string, missing: string[], listOnly: string[], fmtFails: string[], miscFails: string[]): string {
@@ -42,19 +19,22 @@ function summaryForPrompt(score: number, grade: string, missing: string[], listO
 }
 
 /**
- * Ask an OpenAI-compatible chat endpoint (user's own key, client-side only)
- * for general resume improvement tips, returned as markdown prose.
+ * Ask the user's Ollama server (OpenAI-compatible /api/chat) for general
+ * resume improvement tips, returned as markdown prose. Everything is
+ * client-side; the resume and job text go to AI_ENDPOINT.
  */
 export async function requestAiTips(
-  settings: AiSettings,
   resumeText: string,
   jdText: string,
   context: { score: number; grade: string; missing: string[]; listOnly: string[]; fmtFails: string[]; miscFails: string[] },
 ): Promise<string> {
-  const localOllama = /(localhost|127\.0\.0\.1):11434/.test(settings.baseUrl)
-  if (!settings.apiKey.trim() && !localOllama) throw new Error('Add an API key first — it stays in your browser only.')
-  if (!settings.baseUrl.trim()) throw new Error('Base URL is missing.')
   if (!resumeText.trim()) throw new Error('Paste or upload a resume first.')
+  const endpoint = getAiEndpoint()
+  const model = getAiModel()
+  if (!endpoint || !model) {
+    console.warn('[ai] AI tips requested but the AI service is not configured.')
+    throw new Error('AI tips are temporarily unavailable. Please try again later.')
+  }
 
   const system =
     'You are a senior technical recruiter and resume writer. The user is applying through an ATS. ' +
@@ -71,33 +51,32 @@ export async function requestAiTips(
   ].join('\n')
 
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 60_000)
+  const timeout = setTimeout(() => controller.abort(), 120_000)
   try {
-const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (settings.apiKey.trim()) headers.Authorization = `Bearer ${settings.apiKey.trim()}`
-  const res = await fetch(settings.baseUrl.trim(), {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-        model: settings.model.trim() || AI_DEFAULTS.model,
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: user },
         ],
-        temperature: 0.4,
-        max_tokens: 4096,
+        stream: false,
+        think: false,
+        options: { temperature: 0.4, num_predict: 4096 },
       }),
       signal: controller.signal,
     })
     if (!res.ok) {
-      if (res.status === 401 || res.status === 403) throw new Error('The API key was rejected (401/403). Check it and try again.')
-      if (res.status === 429) throw new Error('Rate limited (429). Wait a minute and retry.')
+      if (res.status === 401 || res.status === 403) throw new Error('The AI server rejected the request (401/403).')
+      if (res.status === 429) throw new Error('The AI server is busy (429). Wait a minute and retry.')
       throw new Error(`The AI endpoint returned HTTP ${res.status}.`)
     }
     const data = await res.json()
-    const content: string = data?.choices?.[0]?.message?.content ?? ''
-    if (!content) throw new Error('Empty response from the AI endpoint.')
-    if (data?.choices?.[0]?.finish_reason === 'length') {
+    const content: string = data?.message?.content ?? ''
+    if (!content) throw new Error('Empty response from the AI server.')
+    if (data?.done_reason === 'length') {
       throw new Error('The model response was cut off (token limit reached). Try again.')
     }
     return content
@@ -105,7 +84,7 @@ const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       .replace(/```\s*$/, '')
       .trim()
   } catch (err) {
-    if (err instanceof Error && err.name === 'AbortError') throw new Error('Timed out after 60s — the model may be overloaded.')
+    if (err instanceof Error && err.name === 'AbortError') throw new Error('Timed out after 120s — the model may be overloaded.')
     throw err
   } finally {
     clearTimeout(timeout)

@@ -1,36 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { clearAiSettings, loadAiSettings, requestAiTips, saveAiSettings, AI_DEFAULTS } from './ai'
-import type { AiSettings } from './ai'
+import { getAiEndpoint, getAiModel, requestAiTips } from './ai'
 
-const SETTINGS: AiSettings = { apiKey: 'sk-test', baseUrl: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' }
-
-let store = new Map<string, string>()
+const ENDPOINT = 'http://ollama.local/api/chat'
+const MODEL = 'test-model'
 
 beforeEach(() => {
-  store = new Map<string, string>()
-  vi.stubGlobal('localStorage', {
-    getItem: (k: string) => store.get(k) ?? null,
-    setItem: (k: string, v: string) => store.set(k, v),
-    removeItem: (k: string) => store.delete(k),
-  })
+  vi.stubEnv('OLLAMA_AI_ENDPOINT', ENDPOINT)
+  vi.stubEnv('OLLAMA_AI_MODEL', MODEL)
 })
 
 afterEach(() => {
   vi.unstubAllGlobals()
-})
-
-describe('settings storage', () => {
-  it('round-trips settings through localStorage', () => {
-    saveAiSettings(SETTINGS)
-    expect(loadAiSettings()).toEqual(SETTINGS)
-  })
-
-  it('returns defaults on corrupt or missing storage', () => {
-    store.set('ats-ai-settings', '{not json')
-    expect(loadAiSettings()).toEqual(AI_DEFAULTS)
-    clearAiSettings()
-    expect(loadAiSettings()).toEqual(AI_DEFAULTS)
-  })
 })
 
 async function stubFetch(payload: unknown, ok = true, status = 200) {
@@ -43,39 +23,63 @@ async function stubFetch(payload: unknown, ok = true, status = 200) {
   return fn
 }
 
+describe('config', () => {
+  it('reads the endpoint and model from env', () => {
+    expect(getAiEndpoint()).toBe(ENDPOINT)
+    expect(getAiModel()).toBe(MODEL)
+  })
+})
+
 describe('requestAiTips', () => {
   const resume = 'Resume text'
   const jd = 'Job text'
   const ctx = { score: 64, grade: 'Needs work', missing: ['kubernetes'], listOnly: [], fmtFails: ['Missing Skills'], miscFails: [] }
 
   it('returns the model prose as tips', async () => {
-    await stubFetch({ choices: [{ message: { content: '**Keywords first.** Add Kubernetes to a bullet under Experience.' } }] })
-    const tips = await requestAiTips(SETTINGS, resume, jd, ctx)
+    await stubFetch({ message: { content: '**Keywords first.** Add Kubernetes to a bullet under Experience.' }, done_reason: 'stop' })
+    const tips = await requestAiTips(resume, jd, ctx)
     expect(tips).toBe('**Keywords first.** Add Kubernetes to a bullet under Experience.')
   })
 
+  it('posts to the configured endpoint with thinking disabled', async () => {
+    const fn = await stubFetch({ message: { content: '[]' }, done_reason: 'stop' })
+    await requestAiTips(resume, jd, ctx)
+    const [url, init] = fn.mock.calls[0]
+    expect(url).toBe(ENDPOINT)
+    const body = JSON.parse(init.body as string)
+    expect(body.model).toBe(MODEL)
+    expect(body.think).toBe(false)
+    expect(body.stream).toBe(false)
+    expect(init.headers).not.toHaveProperty('Authorization')
+  })
+
   it('strips markdown code fences from the response', async () => {
-    await stubFetch({
-      choices: [{ message: { content: '```markdown\n**Formatting.** Keep it to one column.\n```' } }],
-    })
-    const tips = await requestAiTips(SETTINGS, resume, jd, ctx)
+    await stubFetch({ message: { content: '```markdown\n**Formatting.** Keep it to one column.\n```' }, done_reason: 'stop' })
+    const tips = await requestAiTips(resume, jd, ctx)
     expect(tips).toBe('**Formatting.** Keep it to one column.')
   })
 
   it('rejects on 401 with a clear message', async () => {
     await stubFetch(null, false, 401)
-    await expect(requestAiTips(SETTINGS, resume, jd, ctx)).rejects.toThrow('401')
+    await expect(requestAiTips(resume, jd, ctx)).rejects.toThrow('401')
   })
 
-  it('rejects when no API key is set for a remote endpoint', async () => {
-    await expect(requestAiTips({ ...SETTINGS, apiKey: '' }, resume, jd, ctx)).rejects.toThrow('API key')
+  it('rejects when the response is empty', async () => {
+    await stubFetch({ message: { content: '' }, done_reason: 'stop' })
+    await expect(requestAiTips(resume, jd, ctx)).rejects.toThrow('Empty response')
   })
 
-  it('allows a missing API key for a local Ollama endpoint', async () => {
-    const fn = await stubFetch({ choices: [{ message: { content: '[]' } }] })
-    const settings = { ...SETTINGS, apiKey: '', baseUrl: 'http://localhost:11434/v1/chat/completions' }
-    await requestAiTips(settings, resume, jd, ctx)
-    const init = fn.mock.calls[0][1] as RequestInit
-    expect(init.headers).not.toHaveProperty('Authorization')
+  it('rejects when the response was cut off', async () => {
+    await stubFetch({ message: { content: 'short' }, done_reason: 'length' })
+    await expect(requestAiTips(resume, jd, ctx)).rejects.toThrow('cut off')
+  })
+
+  it('rejects without a resume', async () => {
+    await expect(requestAiTips('', jd, ctx)).rejects.toThrow('resume')
+  })
+
+  it('shows a generic message when the endpoint env is missing', async () => {
+    vi.stubEnv('OLLAMA_AI_ENDPOINT', '')
+    await expect(requestAiTips(resume, jd, ctx)).rejects.toThrow('temporarily unavailable')
   })
 })

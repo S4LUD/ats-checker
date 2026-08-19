@@ -30,6 +30,8 @@ jobs:
         run: bun run build
         env:
           VITE_BASE: /ats-checker/
+          OLLAMA_AI_ENDPOINT: ${{ vars.OLLAMA_AI_ENDPOINT }}
+          OLLAMA_AI_MODEL: ${{ vars.OLLAMA_AI_MODEL }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
